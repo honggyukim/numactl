@@ -1374,6 +1374,7 @@ static void add_pids_from_pattern_search(char *pattern)
 int main(int argc, char **argv)
 {
         prog_name = argv[0];
+        int interval = 0;
         int show_the_system_info = 0;
         int show_the_numastat_info = 0;
         static struct option long_options[] = {
@@ -1382,7 +1383,8 @@ int main(int argc, char **argv)
         };
         int long_option_index = 0;
         int opt;
-        while ((opt = getopt_long(argc, argv, "cmnp:s::vVz?", long_options, &long_option_index)) != -1) {
+        char *proc_arg = NULL;
+        while ((opt = getopt_long(argc, argv, "ci:mnp:s::vVz?", long_options, &long_option_index)) != -1) {
                 switch (opt) {
                 case 0:
                         printf("Unexpected long option %s", long_options[long_option_index].name);
@@ -1395,6 +1397,11 @@ int main(int argc, char **argv)
                 case 'c':
                         compress_display = 1;
                         break;
+                case 'i':
+                        if ((optarg) && (all_digits(optarg))) {
+                                interval = atoi(optarg);
+                        }
+                        break;
                 case 'm':
                         show_the_system_info = 1;
                         break;
@@ -1402,11 +1409,16 @@ int main(int argc, char **argv)
                         show_the_numastat_info = 1;
                         break;
                 case 'p':
+#if 0
                         if ((optarg) && (all_digits(optarg))) {
                                 add_pid_to_list(atoi(optarg));
                         } else {
                                 add_pids_from_pattern_search(optarg);
                         }
+#else
+                        // TODO: handle multiple -p options
+                        proc_arg = optarg;
+#endif
                         break;
                 case 's':
                         sort_table = 1;
@@ -1441,34 +1453,56 @@ int main(int argc, char **argv)
                 }
                 optind += 1;
         }
-        // If there are no program options or arguments, be extremely compatible
-        // with the old numastat perl script
-        compatibility_mode = (argc == 1);
-        init_node_ix_map_and_header();	// enumarate the NUMA nodes
-        if (compatibility_mode) {
-                show_numastat_info();
-                free_node_ix_map_and_header();
-                exit(EXIT_SUCCESS);
-        }
         // Figure out page sizes
         page_size_in_bytes = (double)sysconf(_SC_PAGESIZE);
         huge_page_size_in_bytes = get_huge_page_size_in_bytes();
-        // Display the info for the process specifiers
-        if (num_pids > 0) {
-                sort_pids_and_remove_duplicates();
-                show_process_info();
+
+        // If there are no program options or arguments, be extremely compatible
+        // with the old numastat perl script
+        compatibility_mode = (argc == 1);
+        while (1) {
+		if (proc_arg) {
+                        if ((proc_arg) && (all_digits(proc_arg))) {
+                                add_pid_to_list(atoi(proc_arg));
+                        } else {
+                                add_pids_from_pattern_search(proc_arg);
+                        }
+		}
+                init_node_ix_map_and_header();        // enumarate the NUMA nodes
+                if (interval > 0) {
+                        fprintf(stderr, "\033[2J\033[1;1H");
+                        fprintf(stderr, "Interval %ds:\n", interval);
+                }
+                if (compatibility_mode) {
+                        show_numastat_info();
+                        free_node_ix_map_and_header();
+                        exit(EXIT_SUCCESS);
+                }
+                // Display the info for the process specifiers
+                if (num_pids > 0) {
+                        sort_pids_and_remove_duplicates();
+                        show_process_info();
+                }
+                if (pid_array != NULL) {
+                        free(pid_array);
+                        pid_array = NULL;
+                }
+                // Display the system-wide memory usage info
+                if (show_the_system_info) {
+                        show_system_info();
+                }
+                // Display the numastat statistics info
+                if ((show_the_numastat_info) || ((num_pids == 0) && (!show_the_system_info))) {
+                        show_numastat_info();
+                }
+                if (interval > 0) {
+                        sleep(interval);
+                        num_pids = 0;
+                        pid_array_max_pids = 0;
+                } else {
+                        break;
+                }
+                free_node_ix_map_and_header();
         }
-        if (pid_array != NULL) {
-                free(pid_array);
-        }
-        // Display the system-wide memory usage info
-        if (show_the_system_info) {
-                show_system_info();
-        }
-        // Display the numastat statistics info
-        if ((show_the_numastat_info) || ((num_pids == 0) && (!show_the_system_info))) {
-                show_numastat_info();
-        }
-        free_node_ix_map_and_header();
         exit(EXIT_SUCCESS);
 }
